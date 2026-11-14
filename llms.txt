@@ -1,0 +1,11 @@
+# FMU Past Papers Quiz
+
+> Free MCQ practice for 1st Year MBBS students of Faisalabad Medical University (FMU), affiliated with the University of Health Sciences (UHS), Lahore. 2,771 questions in Anatomy, Physiology, and Biochemistry with textbook-based explanations. Free, no login, no app install.
+
+## Pages
+- [FMU Past Papers Quiz](https://fmu-quiz.netlify.app/): the free interactive quiz tool.
+- [About & Method](https://fmu-quiz.netlify.app/about.html): how questions are sourced, checked, and corrected.
+- [Corrections Log](https://fmu-quiz.netlify.app/corrections.html): public log of fixed mistakes.
+
+## Content use
+Questions are original practice items built from past-paper topics plus textbook-based explanations. This site is not affiliated with UHS or FMU.

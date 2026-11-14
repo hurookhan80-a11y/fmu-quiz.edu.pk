@@ -1,0 +1,30 @@
+# FMU Past Papers Quiz — cache headers (26 Oct 2026)
+# HTML is never cached blindly (always revalidated) so deploys show up at once.
+# Versioned scripts (?v=...) are immutable: their URL changes on every update,
+# so a long cache is safe and makes repeat visits nearly free.
+# Images use a 1-day cache (they change rarely and are tiny).
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/questions.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/app.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/*.svg"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
