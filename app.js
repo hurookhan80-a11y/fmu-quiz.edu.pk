@@ -107,6 +107,19 @@
             if (PAPER_NAMES.indexOf(name) === -1) PAPER_NAMES.push(name);
           });
         });
+        function batchOfPaper(name) {
+          var m = String(name || "").match(/Batch (30|29|28|27)/);
+          return m ? "Batch " + m[1] : "Other Papers";
+        }
+        var BATCH_ORDER = ["Batch 30", "Batch 29", "Batch 28", "Batch 27", "Other Papers"];
+        function batchLabel(batch) {
+          return batch === "Other Papers" ? "Other Papers" : batch + " Paper";
+        }
+        var SENDUP_PDFS = [
+          { name: "Block A Send-up 30 (PDF)", file: "Block_A_SENDUP_30.pdf" },
+          { name: "Block B Send-up 30 (PDF)", file: "Block_B_SENDUP_30.pdf" },
+          { name: "Block C Send-up 30 (PDF)", file: "Block_C_SENDUP_30.pdf" }
+        ];
         function paperRefs(paper, subject) {
           var out = [];
           MCQ_BANK.forEach(function (item, i) {
@@ -287,13 +300,21 @@
           allOpt.value = "";
           allOpt.textContent = "All past papers (" + paperRefs("", subject).length + ")";
           els.paperSelect.appendChild(allOpt);
-          PAPER_NAMES.forEach(function (paper) {
-            var count = paperRefs(paper, subject).length;
-            if (!count) return;
-            var opt = document.createElement("option");
-            opt.value = paper;
-            opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
-            els.paperSelect.appendChild(opt);
+          BATCH_ORDER.forEach(function (batch) {
+            var group = document.createElement("optgroup");
+            group.label = batchLabel(batch);
+            var any = false;
+            PAPER_NAMES.forEach(function (paper) {
+              if (batchOfPaper(paper) !== batch) return;
+              var count = paperRefs(paper, subject).length;
+              if (!count) return;
+              var opt = document.createElement("option");
+              opt.value = paper;
+              opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
+              group.appendChild(opt);
+              any = true;
+            });
+            if (any) els.paperSelect.appendChild(group);
           });
           if (current && Array.prototype.some.call(els.paperSelect.options, function (opt) { return opt.value === current; })) {
             els.paperSelect.value = current;
@@ -330,19 +351,42 @@
             });
           });
         });
-        PAPER_NAMES.forEach(function (paper) {
-          var refs = paperRefs(paper, "");
-          var card = document.createElement("button");
-          card.type = "button";
-          card.className = "paper-card";
-          var name = document.createElement("strong");
-          name.textContent = paper;
-          var count = document.createElement("span");
-          count.textContent = paperCountText(paper, "");
-          card.appendChild(name);
-          card.appendChild(count);
-          card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
-          els.paperList.appendChild(card);
+        BATCH_ORDER.forEach(function (batch) {
+          var names = PAPER_NAMES.filter(function (paper) { return batchOfPaper(paper) === batch; });
+          if (!names.length && batch !== "Batch 30") return;
+          var head = document.createElement("div");
+          head.className = "paper-group-head";
+          head.textContent = batchLabel(batch);
+          els.paperList.appendChild(head);
+          names.forEach(function (paper) {
+            var refs = paperRefs(paper, "");
+            var card = document.createElement("button");
+            card.type = "button";
+            card.className = "paper-card";
+            var name = document.createElement("strong");
+            name.textContent = paper;
+            var count = document.createElement("span");
+            count.textContent = paperCountText(paper, "");
+            card.appendChild(name);
+            card.appendChild(count);
+            card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
+            els.paperList.appendChild(card);
+          });
+          if (batch === "Batch 30") {
+            SENDUP_PDFS.forEach(function (pdf) {
+              var link = document.createElement("a");
+              link.className = "paper-card pdf-card";
+              link.href = pdf.file;
+              link.setAttribute("download", "");
+              var pname = document.createElement("strong");
+              pname.textContent = pdf.name;
+              var pcount = document.createElement("span");
+              pcount.textContent = "Full paper PDF \u2014 download";
+              link.appendChild(pname);
+              link.appendChild(pcount);
+              els.paperList.appendChild(link);
+            });
+          }
         });
 
         var pastAll = document.createElement("button");
@@ -385,6 +429,15 @@
           }));
         });
 
+        window.fmuSelectPaper = function (paper) {
+          els.paperSelect.value = paper;
+          els.paperSelect.dispatchEvent(new Event("change"));
+          var home = document.getElementById("viewHome");
+          if (home) home.scrollIntoView();
+        };
+        document.querySelectorAll(".paper-pick").forEach(function (btn) {
+          btn.addEventListener("click", function () { window.fmuSelectPaper(btn.getAttribute("data-paper")); });
+        });
         els.bookmarksCard.addEventListener("click", function () {
           var refs = bookmarkKeys.map(function (key) {
             var parts = key.split(":");
