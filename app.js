@@ -8,6 +8,95 @@
           '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
         var QUESTION_SECONDS = 60;
         var SUBJECTS = ["Anatomy", "Physiology", "Biochemistry"];
+        var CHAPTER_SUBJECTS = ["Anatomy", "Physiology", "Biochemistry", "Histology", "Embryology", "Community Medicine", "Pathology", "Pharmacology", "Forensic Medicine", "Microbiology"];
+        var BOOK_SHORT = {
+          "Guyton and Hall, 14th ed.": "Guyton",
+          "Moore — Clinically Oriented Anatomy (KLM)": "KLM",
+          "Lippincott Illustrated Reviews: Biochemistry (8th ed.)": "Lippincott",
+          "Harper's Illustrated Biochemistry (32nd ed.)": "Harper's",
+          "Laiq Hussain — Medical Histology (9th ed.)": "Laiq Hussain",
+          "Moore — The Developing Human": "Developing Human",
+          "Satyanarayana — Textbook of Biochemistry (6th ed.)": "Satyanarayana",
+          "Park — Textbook of Preventive and Social Medicine (26th ed.)": "Park",
+          "Langman's Medical Embryology (15th ed.)": "Langman",
+          "Robbins Basic Pathology (10th ed.)": "Robbins",
+          "Katzung — Basic & Clinical Pharmacology (15th ed.)": "Katzung",
+          "Reddy — Essentials of Forensic Medicine and Toxicology (35th ed.)": "Reddy",
+          "Ananthanarayan & Paniker — Textbook of Microbiology (10th ed.)": "Ananthanarayan"
+        };
+        /* Chapter label for one question. Anatomy shows BOTH books side by side
+           (KLM + BD Chaurasia); otherwise "Book Ch. N: Title". Items whose
+           chapter could not be confirmed are labelled, never guessed. */
+        function chapterLabel(item) {
+          if (item.chapter == null) return "Chapter not confirmed yet";
+          if (item.subject === "Anatomy" && item.chapter_klm) {
+            return item.chapter_klm + " · " + (item.chapter_bd || "");
+          }
+          var book = BOOK_SHORT[item.chapter_book] || item.chapter_book || "";
+          return (book ? book + " " : "") + "Ch. " + item.chapter + (item.chapter_title ? ": " + item.chapter_title : "");
+        }
+        /* "Past paper" for the per-chapter filter: a real paper label, not the
+           "Send-up / Prof" original-bank label. Practice-bank items never count. */
+        function isPastPaper(item, ref) {
+          return ref.b === "m" && !!item.paper && item.paper !== "Send-up / Prof";
+        }
+        /* Chapter groups for one subject, sorted by book then chapter number.
+           Each group: {book, chapter, title, refs, paperRefs, unverified}. */
+        function chapterGroups(subject) {
+          var groups = {};
+          var order = [];
+          [["m", MCQ_BANK], ["p", PRACTICE_BANK]].forEach(function (pair) {
+            pair[1].forEach(function (item, i) {
+              if (item.subject !== subject) return;
+              var ref = { b: pair[0], i: i };
+              var key = item.chapter == null ? "unverified" : (item.chapter_book || "") + "|" + item.chapter;
+              var g = groups[key];
+              if (!g) {
+                g = { key: key, book: item.chapter_book, chapter: item.chapter, title: item.chapter_title, refs: [], paperRefs: [], unverified: item.chapter == null };
+                groups[key] = g;
+                order.push(g);
+              }
+              g.refs.push(ref);
+              if (isPastPaper(item, ref)) g.paperRefs.push(ref);
+            });
+          });
+          order.sort(function (a, b) {
+            if (a.unverified !== b.unverified) return a.unverified ? 1 : -1;
+            if (a.book !== b.book) return a.book < b.book ? -1 : 1;
+            return a.chapter - b.chapter;
+          });
+          return order;
+        }
+        /* Distinct BD Chaurasia references inside one KLM chapter, as a short
+           "Vol. 1 Ch. 2–11" style summary (one KLM chapter spans several BD
+           chapters, so a single BD reference would mislead). */
+        function bdSummary(group) {
+          var seen = {};
+          var vols = {};
+          group.refs.forEach(function (ref) {
+            var bd = itemOf(ref).chapter_bd;
+            if (!bd || seen[bd]) return;
+            seen[bd] = true;
+            var m = bd.match(/Vol\. (\d+), Ch\. (\d+)/);
+            if (!m) return;
+            var v = m[1];
+            (vols[v] = vols[v] || []).push(Number(m[2]));
+          });
+          var parts = Object.keys(vols).sort(function (a, b) { return a - b; }).map(function (v) {
+            var chs = vols[v].sort(function (a, b) { return a - b; });
+            return "Vol. " + v + " Ch. " + (chs.length === 1 ? chs[0] : chs[0] + "–" + chs[chs.length - 1]);
+          });
+          return parts.length ? "BD Chaurasia " + parts.join("; ") : "";
+        }
+        function distinctBdRefs(group) {
+          var seen = {};
+          var out = [];
+          group.refs.forEach(function (ref) {
+            var bd = itemOf(ref).chapter_bd;
+            if (bd && !seen[bd]) { seen[bd] = true; out.push(bd); }
+          });
+          return out;
+        }
 
         var els = {};
         [
@@ -17,15 +106,16 @@
           "timingQuizTitle", "timingImmediate", "timingEnd", "timingContinueBtn",
           "pastTotal", "pastList", "practiceTotal", "practiceList", "overviewQuestions", "overviewPapers",
           "paperSelect", "subjectSelect", "timerOptions", "filteredCount", "startFilteredBtn", "paperList", "paperBrowseCount",
+          "chapterSubjects", "chapterPanel",
           "bookmarksCard", "bookmarksCount", "mistakesCard", "mistakesCount", "statsCard", "statsSummary", "reviewCard",
           "pillTimer", "timerText", "pillCorrect", "pillWrong", "pillAttempted",
           "progressFill", "finishEarly", "quizTopic", "qCard", "qTimeoutBanner", "qNum", "qText", "qOptions",
-          "bookmarkBtn", "bookmarkLabel", "qExplain", "eAns", "eText", "qTimeout", "qSource", "qPaper", "prevBtn", "nextBtn",
+          "bookmarkBtn", "bookmarkLabel", "qExplain", "eAns", "eText", "qTimeout", "qSource", "qChapter", "qPaper", "prevBtn", "nextBtn",
           "resultTopic", "resultPct", "resultPctLabel", "statTotal", "statAttempted", "statCorrect",
           "statWrong", "statAccuracy", "statSkipped", "resultMsg", "resultBreakdown", "fullReview", "reviewBtn", "retryResultMistakesBtn",
           "downloadResultMistakesBtn", "downloadNoteResult",
           "restartBtn", "changeTopicBtn", "reviewSub", "rNum", "rText",
-          "rOptions", "rAns", "rText2", "rSource", "rPaper", "rPrevBtn", "rNextBtn",
+          "rOptions", "rAns", "rText2", "rSource", "rChapter", "rPaper", "rPrevBtn", "rNextBtn",
           "backToResultBtn", "mistakesSub", "mistakesList", "retryMistakesBtn",
           "downloadMistakesBtn", "downloadNoteMistakes", "clearMistakesBtn", "mistakesHomeBtn", "stAttempted", "stCorrect",
           "stWrong", "stAccuracy", "statsBySubject", "statsByPaper", "resetStatsBtn", "statsHomeBtn",
@@ -107,19 +197,6 @@
             if (PAPER_NAMES.indexOf(name) === -1) PAPER_NAMES.push(name);
           });
         });
-        function batchOfPaper(name) {
-          var m = String(name || "").match(/Batch (30|29|28|27)/);
-          return m ? "Batch " + m[1] : "Other Papers";
-        }
-        var BATCH_ORDER = ["Batch 30", "Batch 29", "Batch 28", "Batch 27", "Other Papers"];
-        function batchLabel(batch) {
-          return batch === "Other Papers" ? "Other Papers" : batch + " Paper";
-        }
-        var SENDUP_PDFS = [
-          { name: "Block A Send-up 30 (PDF)", file: "Block_A_SENDUP_30.pdf" },
-          { name: "Block B Send-up 30 (PDF)", file: "Block_B_SENDUP_30.pdf" },
-          { name: "Block C Send-up 30 (PDF)", file: "Block_C_SENDUP_30.pdf" }
-        ];
         function paperRefs(paper, subject) {
           var out = [];
           MCQ_BANK.forEach(function (item, i) {
@@ -300,21 +377,13 @@
           allOpt.value = "";
           allOpt.textContent = "All past papers (" + paperRefs("", subject).length + ")";
           els.paperSelect.appendChild(allOpt);
-          BATCH_ORDER.forEach(function (batch) {
-            var group = document.createElement("optgroup");
-            group.label = batchLabel(batch);
-            var any = false;
-            PAPER_NAMES.forEach(function (paper) {
-              if (batchOfPaper(paper) !== batch) return;
-              var count = paperRefs(paper, subject).length;
-              if (!count) return;
-              var opt = document.createElement("option");
-              opt.value = paper;
-              opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
-              group.appendChild(opt);
-              any = true;
-            });
-            if (any) els.paperSelect.appendChild(group);
+          PAPER_NAMES.forEach(function (paper) {
+            var count = paperRefs(paper, subject).length;
+            if (!count) return;
+            var opt = document.createElement("option");
+            opt.value = paper;
+            opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
+            els.paperSelect.appendChild(opt);
           });
           if (current && Array.prototype.some.call(els.paperSelect.options, function (opt) { return opt.value === current; })) {
             els.paperSelect.value = current;
@@ -351,42 +420,19 @@
             });
           });
         });
-        BATCH_ORDER.forEach(function (batch) {
-          var names = PAPER_NAMES.filter(function (paper) { return batchOfPaper(paper) === batch; });
-          if (!names.length && batch !== "Batch 30") return;
-          var head = document.createElement("div");
-          head.className = "paper-group-head";
-          head.textContent = batchLabel(batch);
-          els.paperList.appendChild(head);
-          names.forEach(function (paper) {
-            var refs = paperRefs(paper, "");
-            var card = document.createElement("button");
-            card.type = "button";
-            card.className = "paper-card";
-            var name = document.createElement("strong");
-            name.textContent = paper;
-            var count = document.createElement("span");
-            count.textContent = paperCountText(paper, "");
-            card.appendChild(name);
-            card.appendChild(count);
-            card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
-            els.paperList.appendChild(card);
-          });
-          if (batch === "Batch 30") {
-            SENDUP_PDFS.forEach(function (pdf) {
-              var link = document.createElement("a");
-              link.className = "paper-card pdf-card";
-              link.href = pdf.file;
-              link.setAttribute("download", "");
-              var pname = document.createElement("strong");
-              pname.textContent = pdf.name;
-              var pcount = document.createElement("span");
-              pcount.textContent = "Full paper PDF \u2014 download";
-              link.appendChild(pname);
-              link.appendChild(pcount);
-              els.paperList.appendChild(link);
-            });
-          }
+        PAPER_NAMES.forEach(function (paper) {
+          var refs = paperRefs(paper, "");
+          var card = document.createElement("button");
+          card.type = "button";
+          card.className = "paper-card";
+          var name = document.createElement("strong");
+          name.textContent = paper;
+          var count = document.createElement("span");
+          count.textContent = paperCountText(paper, "");
+          card.appendChild(name);
+          card.appendChild(count);
+          card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
+          els.paperList.appendChild(card);
         });
 
         var pastAll = document.createElement("button");
@@ -429,15 +475,148 @@
           }));
         });
 
-        window.fmuSelectPaper = function (paper) {
-          els.paperSelect.value = paper;
-          els.paperSelect.dispatchEvent(new Event("change"));
-          var home = document.getElementById("viewHome");
-          if (home) home.scrollIntoView();
-        };
-        document.querySelectorAll(".paper-pick").forEach(function (btn) {
-          btn.addEventListener("click", function () { window.fmuSelectPaper(btn.getAttribute("data-paper")); });
-        });
+        /* ---------------- home: browse by chapter ---------------- */
+        function subjectTotal(subject) {
+          var n = 0;
+          [["m", MCQ_BANK], ["p", PRACTICE_BANK]].forEach(function (pair) {
+            pair[1].forEach(function (item) { if (item.subject === subject) n++; });
+          });
+          return n;
+        }
+        function chapterCardLabel(group) {
+          if (group.unverified) return "Chapter not confirmed yet";
+          if (group.book === "Moore — Clinically Oriented Anatomy (KLM)") {
+            var first = null;
+            group.refs.some(function (ref) {
+              var it = itemOf(ref);
+              if (it.chapter_klm) { first = it; return true; }
+              return false;
+            });
+            if (first) {
+              var summary = bdSummary(group);
+              return first.chapter_klm + (summary ? " · " + summary : "");
+            }
+          }
+          var book = BOOK_SHORT[group.book] || group.book || "";
+          return (book ? book + " " : "") + "Ch. " + group.chapter + (group.title ? ": " + group.title : "");
+        }
+        function renderChapterList(subject) {
+          els.chapterPanel.innerHTML = "";
+          var head = document.createElement("div");
+          head.className = "subject-head serif";
+          head.appendChild(document.createTextNode(subject));
+          var tot = document.createElement("span");
+          tot.className = "subject-total";
+          tot.textContent = subjectTotal(subject) + " questions";
+          head.appendChild(tot);
+          els.chapterPanel.appendChild(head);
+          var note = document.createElement("p");
+          note.className = "section-note";
+          note.textContent = subject === "Anatomy"
+            ? "Each chapter shows both books — KLM (Moore) and BD Chaurasia — side by side."
+            : "Chapters are from the book the questions are based on.";
+          els.chapterPanel.appendChild(note);
+          chapterGroups(subject).forEach(function (group) {
+            var label = chapterCardLabel(group);
+            var countText = group.refs.length + (group.refs.length === 1 ? " question" : " questions") +
+              (group.paperRefs.length ? " · " + group.paperRefs.length + " past-paper" : "");
+            els.chapterPanel.appendChild(makeTopicCard(label, countText, "Open →", function () {
+              renderChapterDetail(subject, group);
+            }));
+          });
+          var back = document.createElement("button");
+          back.type = "button";
+          back.className = "btn back chapter-back";
+          back.textContent = "← All subjects";
+          back.addEventListener("click", function () {
+            els.chapterPanel.innerHTML = "";
+            renderChapterSubjects();
+          });
+          els.chapterPanel.appendChild(back);
+        }
+        function renderChapterDetail(subject, group) {
+          els.chapterPanel.innerHTML = "";
+          var head = document.createElement("div");
+          head.className = "subject-head serif";
+          head.appendChild(document.createTextNode(chapterCardLabel(group)));
+          els.chapterPanel.appendChild(head);
+          if (group.unverified) {
+            var unNote = document.createElement("p");
+            unNote.className = "section-note";
+            unNote.textContent = "These questions could not be matched to a book chapter with confidence, so they are listed here instead of being guessed into a chapter.";
+            els.chapterPanel.appendChild(unNote);
+          } else if (group.book === "Moore — Clinically Oriented Anatomy (KLM)") {
+            var books = document.createElement("div");
+            books.className = "chapter-books";
+            var klmLine = document.createElement("div");
+            var klmStrong = document.createElement("strong");
+            klmStrong.textContent = "KLM: ";
+            klmLine.appendChild(klmStrong);
+            var first = null;
+            group.refs.some(function (ref) {
+              var it = itemOf(ref);
+              if (it.chapter_klm) { first = it; return true; }
+              return false;
+            });
+            klmLine.appendChild(document.createTextNode(first ? first.chapter_klm : ""));
+            books.appendChild(klmLine);
+            distinctBdRefs(group).forEach(function (bd) {
+              var line = document.createElement("div");
+              var bStrong = document.createElement("strong");
+              bStrong.textContent = "BD Chaurasia: ";
+              line.appendChild(bStrong);
+              line.appendChild(document.createTextNode(bd.replace(/^BD Chaurasia /, "")));
+              books.appendChild(line);
+            });
+            els.chapterPanel.appendChild(books);
+          } else {
+            var bookLine = document.createElement("p");
+            bookLine.className = "section-note";
+            bookLine.textContent = "Book: " + (group.book || "");
+            els.chapterPanel.appendChild(bookLine);
+          }
+          var allBtn = document.createElement("button");
+          allBtn.type = "button";
+          allBtn.className = "btn primary chapter-choice";
+          allBtn.textContent = "Start all " + group.refs.length + " MCQs";
+          allBtn.addEventListener("click", function () {
+            startQuiz(subject + " · " + chapterCardLabel(group), group.refs);
+          });
+          els.chapterPanel.appendChild(allBtn);
+          if (group.paperRefs.length) {
+            var paperBtn = document.createElement("button");
+            paperBtn.type = "button";
+            paperBtn.className = "btn gold chapter-choice";
+            paperBtn.textContent = "Sirf past paper MCQs (" + group.paperRefs.length + ")";
+            paperBtn.addEventListener("click", function () {
+              startQuiz(subject + " · " + chapterCardLabel(group) + " · Past papers only", group.paperRefs);
+            });
+            els.chapterPanel.appendChild(paperBtn);
+          } else {
+            var none = document.createElement("p");
+            none.className = "section-note";
+            none.textContent = "No past-paper MCQs in this chapter yet — only practice questions.";
+            els.chapterPanel.appendChild(none);
+          }
+          var back = document.createElement("button");
+          back.type = "button";
+          back.className = "btn back chapter-back";
+          back.textContent = "← Back to " + subject + " chapters";
+          back.addEventListener("click", function () { renderChapterList(subject); });
+          els.chapterPanel.appendChild(back);
+        }
+        function renderChapterSubjects() {
+          els.chapterSubjects.innerHTML = "";
+          CHAPTER_SUBJECTS.forEach(function (subject) {
+            var n = subjectTotal(subject);
+            if (!n) return;
+            els.chapterSubjects.appendChild(makeTopicCard(subject, n + " questions", "Chapters →", function () {
+              renderChapterList(subject);
+            }));
+          });
+        }
+        renderChapterSubjects();
+
         els.bookmarksCard.addEventListener("click", function () {
           var refs = bookmarkKeys.map(function (key) {
             var parts = key.split(":");
@@ -471,7 +650,7 @@
           searchMatches = [];
           [["m", MCQ_BANK], ["p", PRACTICE_BANK]].forEach(function (pair) {
             pair[1].forEach(function (item, i) {
-              var hay = (item.q + " " + item.subject + " " + (item.paper || "") + " " + item.options.join(" ")).toLowerCase();
+              var hay = (item.q + " " + item.subject + " " + (item.paper || "") + " " + chapterLabel(item) + " " + item.options.join(" ")).toLowerCase();
               var ok = words.every(function (w) { return hay.indexOf(w) !== -1; });
               if (ok) searchMatches.push({ b: pair[0], i: i });
             });
@@ -751,6 +930,11 @@
             srcStrong.textContent = "Source: ";
             els.qSource.appendChild(srcStrong);
             els.qSource.appendChild(document.createTextNode(item.source));
+            els.qChapter.innerHTML = "";
+            var qChStrong = document.createElement("strong");
+            qChStrong.textContent = "Chapter: ";
+            els.qChapter.appendChild(qChStrong);
+            els.qChapter.appendChild(document.createTextNode(chapterLabel(item)));
             els.qTimeout.hidden = chosen !== -1;
             els.qExplain.classList.add("show");
           } else {
@@ -947,6 +1131,13 @@
             explain.appendChild(ehead);
             explain.appendChild(ebody);
             explain.appendChild(source);
+            var chLine = document.createElement("div");
+            chLine.className = "source-line";
+            var chStrong = document.createElement("strong");
+            chStrong.textContent = "Chapter: ";
+            chLine.appendChild(chStrong);
+            chLine.appendChild(document.createTextNode(chapterLabel(item)));
+            explain.appendChild(chLine);
             var paperText = paperLineText(ref, item, false);
             card.appendChild(num);
             card.appendChild(question);
@@ -1144,6 +1335,11 @@
           srcStrong.textContent = "Source: ";
           els.rSource.appendChild(srcStrong);
           els.rSource.appendChild(document.createTextNode(item.source));
+          els.rChapter.innerHTML = "";
+          var rChStrong = document.createElement("strong");
+          rChStrong.textContent = "Chapter: ";
+          els.rChapter.appendChild(rChStrong);
+          els.rChapter.appendChild(document.createTextNode(chapterLabel(item)));
           var reviewPaperText = paperLineText(ref, item, true);
           els.rPaper.textContent = reviewPaperText;
           els.rPaper.hidden = !reviewPaperText;
@@ -1421,6 +1617,13 @@
               ex.appendChild(eh);
               ex.appendChild(eb);
               ex.appendChild(sl);
+              var chLine = document.createElement("div");
+              chLine.className = "source-line";
+              var chStrong = document.createElement("strong");
+              chStrong.textContent = "Chapter: ";
+              chLine.appendChild(chStrong);
+              chLine.appendChild(document.createTextNode(chapterLabel(item)));
+              ex.appendChild(chLine);
               var mistakePaperText = paperLineText(ref, item, false);
               if (mistakePaperText) {
                 var paperLine = document.createElement("div");
