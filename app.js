@@ -197,6 +197,19 @@
             if (PAPER_NAMES.indexOf(name) === -1) PAPER_NAMES.push(name);
           });
         });
+        var PAPER_BATCH_ORDER = ["Batch 30", "Batch 29", "Batch 28", "Batch 27", "Other Papers"];
+        function paperBatchName(paper) {
+          var match = String(paper || "").match(/Batch\s*(30|29|28|27)\b/);
+          return match ? "Batch " + match[1] : "Other Papers";
+        }
+        function groupedPaperNames() {
+          var groups = {};
+          PAPER_BATCH_ORDER.forEach(function (batch) { groups[batch] = []; });
+          PAPER_NAMES.forEach(function (paper) { groups[paperBatchName(paper)].push(paper); });
+          return PAPER_BATCH_ORDER.map(function (batch) {
+            return { batch: batch, papers: groups[batch] };
+          }).filter(function (group) { return group.papers.length; });
+        }
         function paperRefs(paper, subject) {
           var out = [];
           MCQ_BANK.forEach(function (item, i) {
@@ -377,13 +390,18 @@
           allOpt.value = "";
           allOpt.textContent = "All past papers (" + paperRefs("", subject).length + ")";
           els.paperSelect.appendChild(allOpt);
-          PAPER_NAMES.forEach(function (paper) {
-            var count = paperRefs(paper, subject).length;
-            if (!count) return;
-            var opt = document.createElement("option");
-            opt.value = paper;
-            opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
-            els.paperSelect.appendChild(opt);
+          groupedPaperNames().forEach(function (group) {
+            var visible = group.papers.filter(function (paper) { return paperRefs(paper, subject).length; });
+            if (!visible.length) return;
+            var optGroup = document.createElement("optgroup");
+            optGroup.label = group.batch === "Other Papers" ? "Other Papers" : group.batch + " Papers";
+            visible.forEach(function (paper) {
+              var opt = document.createElement("option");
+              opt.value = paper;
+              opt.textContent = paper + " (" + paperCountText(paper, subject) + ")";
+              optGroup.appendChild(opt);
+            });
+            els.paperSelect.appendChild(optGroup);
           });
           if (current && Array.prototype.some.call(els.paperSelect.options, function (opt) { return opt.value === current; })) {
             els.paperSelect.value = current;
@@ -420,19 +438,28 @@
             });
           });
         });
-        PAPER_NAMES.forEach(function (paper) {
-          var refs = paperRefs(paper, "");
-          var card = document.createElement("button");
-          card.type = "button";
-          card.className = "paper-card";
-          var name = document.createElement("strong");
-          name.textContent = paper;
-          var count = document.createElement("span");
-          count.textContent = paperCountText(paper, "");
-          card.appendChild(name);
-          card.appendChild(count);
-          card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
-          els.paperList.appendChild(card);
+        groupedPaperNames().forEach(function (group) {
+          var heading = document.createElement("div");
+          heading.className = "paper-batch-head";
+          heading.style.gridColumn = "1 / -1";
+          heading.style.fontWeight = "700";
+          heading.style.marginTop = "10px";
+          heading.textContent = (group.batch === "Other Papers" ? "Other Papers" : group.batch + " Papers") + " · " + group.papers.length + (group.papers.length === 1 ? " paper" : " papers");
+          els.paperList.appendChild(heading);
+          group.papers.forEach(function (paper) {
+            var refs = paperRefs(paper, "");
+            var card = document.createElement("button");
+            card.type = "button";
+            card.className = "paper-card";
+            var name = document.createElement("strong");
+            name.textContent = paper;
+            var count = document.createElement("span");
+            count.textContent = paperCountText(paper, "");
+            card.appendChild(name);
+            card.appendChild(count);
+            card.addEventListener("click", function () { startQuiz(paper + " · All Subjects", refs); });
+            els.paperList.appendChild(card);
+          });
         });
 
         var pastAll = document.createElement("button");
