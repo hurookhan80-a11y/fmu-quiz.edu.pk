@@ -1438,7 +1438,7 @@
           parts.push("@media print{body{background:#fff;}.wrap{max-width:none;padding:12px;}.card{break-inside:avoid;box-shadow:none;}}");
           parts.push("</style></head><body><div class=\"wrap\">");
           parts.push("<h1>FMU Past Papers Quiz &mdash; My Mistakes</h1>");
-          parts.push('<p class="credit">Developed by <strong>Habib Ullah</strong> &mdash; 1st Year MBBS Student, FMU</p>');
+          parts.push('<p class="credit"><strong>Dr. Habib Ullah</strong> B\'30 FMU</p>');
           parts.push('<p class="meta">' + escapeHtml(total + (total === 1 ? " question" : " questions") + " to revise &middot; Downloaded " + dateStr) + "</p>");
 
           SUBJECTS.forEach(function (subject) {
