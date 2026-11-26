@@ -143,7 +143,7 @@
           "timingQuizTitle", "timingImmediate", "timingEnd", "timingContinueBtn",
           "pastTotal", "pastList", "practiceTotal", "practiceList", "overviewQuestions", "overviewPapers",
           "paperSelect", "subjectSelect", "timerOptions", "filteredCount", "startFilteredBtn", "paperList", "paperBrowseCount",
-          "chapterSubjects", "chapterPanel",
+          "chapterSubjects", "chapterPanel", "chapterSearchInput", "chapterSearchResults",
           "bookmarksCard", "bookmarksCount", "mistakesCard", "mistakesCount", "statsCard", "statsSummary", "reviewCard",
           "pillTimer", "timerText", "pillCorrect", "pillWrong", "pillAttempted",
           "progressFill", "finishEarly", "quizTopic", "qCard", "qTimeoutBanner", "qNum", "qText", "qOptions",
@@ -668,6 +668,156 @@
           });
         }
         renderChapterSubjects();
+
+        /* ---------------- home: chapter search ---------------- */
+        function normalizeSearchText(text) {
+          return String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+        }
+        function searchTokens(text) {
+          var normalized = normalizeSearchText(text);
+          return normalized ? normalized.split(" ") : [];
+        }
+        function stemToken(token) {
+          var t = String(token || "");
+          if (t.length > 5 && t.slice(-3) === "ies") t = t.slice(0, -3) + "y";
+          if (t.length > 5 && t.slice(-3) === "ing") t = t.slice(0, -3);
+          if (t.length > 4 && t.slice(-2) === "ed") t = t.slice(0, -2);
+          if (t.length > 4 && t.slice(-2) === "es") t = t.slice(0, -2);
+          if (t.length > 3 && t.slice(-1) === "s") t = t.slice(0, -1);
+          return t;
+        }
+        function editDistance(a, b) {
+          var la = a.length;
+          var lb = b.length;
+          if (Math.abs(la - lb) > 2) return 99;
+          var prev = [];
+          var curr = [];
+          for (var j = 0; j <= lb; j++) prev[j] = j;
+          for (var i = 1; i <= la; i++) {
+            curr[0] = i;
+            for (var k = 1; k <= lb; k++) {
+              curr[k] = Math.min(prev[k] + 1, curr[k - 1] + 1, prev[k - 1] + (a[i - 1] === b[k - 1] ? 0 : 1));
+            }
+            var swap = prev;
+            prev = curr;
+            curr = swap;
+          }
+          return prev[lb];
+        }
+        function tokenMatchScore(queryToken, token) {
+          if (!queryToken || !token) return 0;
+          if (queryToken === token) return 10;
+          if (queryToken.length < 3 || token.length < 3) return 0;
+          var qStem = stemToken(queryToken);
+          var tStem = stemToken(token);
+          if (qStem === tStem) return 9;
+          if (token.indexOf(queryToken) === 0 || queryToken.indexOf(token) === 0) return 7;
+          if (token.indexOf(qStem) !== -1 || qStem.indexOf(tStem) !== -1) return 5;
+          var allowed = queryToken.length >= 8 ? 2 : queryToken.length >= 5 ? 1 : 0;
+          if (allowed && editDistance(queryToken, token) <= allowed) return 6;
+          return 0;
+        }
+        var chapterSearchIndex = null;
+        function buildChapterSearchIndex() {
+          if (chapterSearchIndex) return chapterSearchIndex;
+          chapterSearchIndex = [];
+          CHAPTER_SUBJECTS.forEach(function (subject, subjectOrder) {
+            chapterGroups(subject).forEach(function (group, groupOrder) {
+              var label = chapterCardLabel(group);
+              var metaText = [subject, label, group.book || "", group.chapter || "", group.title || "", group.bdLabel || ""].join(" ");
+              var contentParts = [];
+              group.refs.forEach(function (ref) {
+                var item = itemOf(ref);
+                contentParts.push(item.q + " " + item.options.join(" ") + " " + (item.source || "") + " " + chapterLabel(item));
+              });
+              chapterSearchIndex.push({
+                subject: subject,
+                subjectOrder: subjectOrder,
+                groupOrder: groupOrder,
+                group: group,
+                label: label,
+                metaText: normalizeSearchText(metaText),
+                metaTokens: searchTokens(metaText),
+                contentText: normalizeSearchText(contentParts.join(" "))
+              });
+            });
+          });
+          return chapterSearchIndex;
+        }
+        function scoreChapterSearchEntry(entry, queryText, queryTokens) {
+          var score = 0;
+          var matchedMeta = 0;
+          if (entry.metaText.indexOf(queryText) !== -1) score += 45;
+          queryTokens.forEach(function (qt) {
+            var best = 0;
+            entry.metaTokens.forEach(function (token) {
+              var s = tokenMatchScore(qt, token);
+              if (s > best) best = s;
+            });
+            if (best > 0) {
+              matchedMeta++;
+              score += best * 3;
+            }
+            if (/^\d+$/.test(qt) && Number(qt) === Number(entry.group.chapter)) score += 25;
+            var stem = stemToken(qt);
+            var contentCount = 0;
+            entry.group.refs.forEach(function (ref) {
+              var item = itemOf(ref);
+              var text = normalizeSearchText(item.q + " " + item.options.join(" ") + " " + (item.source || ""));
+              if (text.indexOf(qt) !== -1 || text.indexOf(stem) !== -1) contentCount++;
+            });
+            if (contentCount > 0) score += 8 + Math.min(20, contentCount * 2);
+            else if (entry.contentText.indexOf(stem) !== -1) score += 5;
+          });
+          if (queryTokens.length > 1 && matchedMeta === queryTokens.length) score += 25;
+          return score;
+        }
+        function renderChapterSearch() {
+          if (!els.chapterSearchInput || !els.chapterSearchResults) return;
+          var raw = els.chapterSearchInput.value.trim();
+          var queryText = normalizeSearchText(raw);
+          var queryTokens = searchTokens(raw);
+          els.chapterSearchResults.innerHTML = "";
+          if (queryText.length < 2) {
+            els.chapterSearchResults.classList.remove("open");
+            return;
+          }
+          var scored = buildChapterSearchIndex().map(function (entry) {
+            return { entry: entry, score: scoreChapterSearchEntry(entry, queryText, queryTokens) };
+          }).filter(function (row) { return row.score >= 18; });
+          scored.sort(function (a, b) {
+            if (b.score !== a.score) return b.score - a.score;
+            if (a.entry.subjectOrder !== b.entry.subjectOrder) return a.entry.subjectOrder - b.entry.subjectOrder;
+            return a.entry.groupOrder - b.entry.groupOrder;
+          });
+          var shown = scored.slice(0, 12);
+          els.chapterSearchResults.classList.add("open");
+          var count = document.createElement("p");
+          count.className = "search-count";
+          count.textContent = shown.length === 0
+            ? "No chapter found for “" + raw + "”. Try a shorter word."
+            : shown.length + (shown.length === 1 ? " chapter found" : " chapters found") + " — tap one to open it:";
+          els.chapterSearchResults.appendChild(count);
+          shown.forEach(function (row) {
+            var entry = row.entry;
+            var group = entry.group;
+            var countText = group.refs.length + (group.refs.length === 1 ? " question" : " questions") +
+              (group.paperRefs.length ? " · " + group.paperRefs.length + " past-paper" : "");
+            var card = makeTopicCard(entry.subject + " · " + entry.label, countText, "Open →", function () {
+              renderChapterDetail(entry.subject, group);
+              if (els.chapterPanel.scrollIntoView) els.chapterPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+            card.className += " " + subjectClass(entry.subject);
+            els.chapterSearchResults.appendChild(card);
+          });
+        }
+        var chapterSearchTimer = null;
+        if (els.chapterSearchInput) {
+          els.chapterSearchInput.addEventListener("input", function () {
+            clearTimeout(chapterSearchTimer);
+            chapterSearchTimer = setTimeout(renderChapterSearch, 120);
+          });
+        }
 
         els.bookmarksCard.addEventListener("click", function () {
           var refs = bookmarkKeys.map(function (key) {
