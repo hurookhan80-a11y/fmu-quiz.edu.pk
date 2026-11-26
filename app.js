@@ -157,7 +157,7 @@
           "downloadMistakesBtn", "downloadNoteMistakes", "clearMistakesBtn", "mistakesHomeBtn", "stAttempted", "stCorrect",
           "stWrong", "stAccuracy", "statsBySubject", "statsByPaper", "resetStatsBtn", "statsHomeBtn",
           "reviewName", "reviewText", "copyReviewBtn", "copyNote", "sendHomeBtn",
-          "copyEmailBtn", "emailCopyNote"
+          "copyEmailBtn", "emailCopyNote", "quizMateLauncher", "quizMatePanel", "quizMateClose", "quizMateMessages", "quizMateForm", "quizMateInput"
         ].forEach(function (id) { els[id] = document.getElementById(id); });
 
         var VIEW_IDS = ["viewWelcome", "viewHome", "viewTiming", "viewQuiz", "viewResult", "viewReview", "viewMistakes", "viewStats", "viewSend"];
@@ -2007,6 +2007,197 @@
           } else {
             fallback();
           }
+        });
+
+
+        /* ---------------- QuizMate helper ---------------- */
+        function qmAddMessage(text, who, actions) {
+          if (!els.quizMateMessages) return;
+          var msg = document.createElement("div");
+          msg.className = "qm-msg " + (who === "user" ? "user" : "bot");
+          msg.textContent = text;
+          if (actions && actions.length) {
+            var wrap = document.createElement("div");
+            wrap.className = "qm-actions";
+            actions.forEach(function (action) {
+              var btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "qm-action";
+              btn.textContent = action.label;
+              btn.addEventListener("click", function () {
+                qmClose();
+                action.run();
+              });
+              wrap.appendChild(btn);
+            });
+            msg.appendChild(wrap);
+          }
+          els.quizMateMessages.appendChild(msg);
+          els.quizMateMessages.scrollTop = els.quizMateMessages.scrollHeight;
+        }
+        function qmOpen() {
+          if (!els.quizMatePanel) return;
+          els.quizMatePanel.classList.add("open");
+          if (!els.quizMateMessages.childElementCount) {
+            qmAddMessage("Hi! Ask me about chapters, MCQs, papers, mistakes, or stats. I answer from this quiz bank.", "bot");
+          }
+          setTimeout(function () { if (els.quizMateInput) els.quizMateInput.focus(); }, 50);
+        }
+        function qmClose() {
+          if (els.quizMatePanel) els.quizMatePanel.classList.remove("open");
+        }
+        function qmGoHome() {
+          show("viewHome");
+        }
+        function qmOpenPapers() {
+          qmGoHome();
+          var details = els.paperList && els.paperList.closest ? els.paperList.closest("details") : null;
+          if (details) details.open = true;
+          if (els.paperList) els.paperList.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        function qmOpenChapter(entry) {
+          qmGoHome();
+          renderChapterDetail(entry.subject, entry.group);
+          if (els.chapterPanel) els.chapterPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        function qmTopChapters(query) {
+          var queryText = normalizeSearchText(query);
+          var queryTokens = searchTokens(query);
+          if (queryText.length < 2) return [];
+          return buildChapterSearchIndex().map(function (entry) {
+            return { entry: entry, score: scoreChapterSearchEntry(entry, queryText, queryTokens) };
+          }).filter(function (row) { return row.score > 0; }).sort(function (a, b) {
+            if (b.score !== a.score) return b.score - a.score;
+            if (a.entry.subjectOrder !== b.entry.subjectOrder) return a.entry.subjectOrder - b.entry.subjectOrder;
+            return a.entry.groupOrder - b.entry.groupOrder;
+          }).slice(0, 3);
+        }
+        function qmBestMcq(query) {
+          var tokens = searchTokens(query).filter(function (t) { return t.length > 2; });
+          if (!tokens.length) return null;
+          var best = null;
+          [["m", MCQ_BANK], ["p", PRACTICE_BANK]].forEach(function (pair) {
+            pair[1].forEach(function (item, i) {
+              var text = normalizeSearchText(item.q + " " + item.options.join(" ") + " " + (item.explanation || "") + " " + (item.source || "") + " " + chapterLabel(item));
+              var score = 0;
+              tokens.forEach(function (t) { if (text.indexOf(t) !== -1) score += 2; });
+              if (normalizeSearchText(item.q).indexOf(normalizeSearchText(query)) !== -1) score += 8;
+              if (!best || score > best.score) best = { ref: { b: pair[0], i: i }, item: item, score: score };
+            });
+          });
+          return best && best.score >= 4 ? best : null;
+        }
+        function qmCurrentItem() {
+          if (!quiz || currentViewId !== "viewQuiz" || !quiz.order || !quiz.order[quiz.pos]) return null;
+          return { ref: quiz.order[quiz.pos], item: itemOf(quiz.order[quiz.pos]), chosen: quiz.chosen[quiz.pos] };
+        }
+        function qmExplainItem(item) {
+          return "Correct answer: " + (LETTERS[item.answer] || "") + ". " + item.options[item.answer] + "\n" + item.explanation + "\nSource: " + item.source + "\nChapter: " + chapterLabel(item);
+        }
+        function qmWeakTopicsText() {
+          var parts = [];
+          var subjects = SUBJECTS.map(function (subject) {
+            var s = stats.bySubject[subject] || { attempted: 0, correct: 0, wrong: 0 };
+            return { subject: subject, attempted: s.attempted, wrong: s.wrong, acc: s.attempted ? Math.round((s.correct / s.attempted) * 100) : 0 };
+          }).filter(function (s) { return s.attempted >= 3; }).sort(function (a, b) { return a.acc - b.acc; });
+          if (subjects.length) parts.push("Weakest subject: " + subjects[0].subject + " (" + subjects[0].acc + "% correct, " + subjects[0].wrong + " wrong).");
+          var chapterCounts = {};
+          mistakeKeys.forEach(function (key) {
+            var partsKey = key.split(":");
+            var item = itemOf({ b: partsKey[0], i: Number(partsKey[1]) });
+            var label = item.subject + " · " + chapterLabel(item);
+            chapterCounts[label] = (chapterCounts[label] || 0) + 1;
+          });
+          var topChapters = Object.keys(chapterCounts).sort(function (a, b) { return chapterCounts[b] - chapterCounts[a]; }).slice(0, 3);
+          if (topChapters.length) parts.push("Revise these first: " + topChapters.map(function (label) { return label + " (" + chapterCounts[label] + " mistakes)"; }).join("; ") + ".");
+          if (!parts.length) return "No weak topics yet. Attempt a quiz first, then I will use your mistakes and stats to guide revision.";
+          return parts.join("\n");
+        }
+        function qmAnswer(raw) {
+          var query = String(raw || "").trim();
+          if (!query) return;
+          qmAddMessage(query, "user");
+          var q = normalizeSearchText(query);
+          var current = qmCurrentItem();
+          var examLocked = current && quiz.feedbackMode === "end" && current.chosen === undefined;
+          if (examLocked && /(explain|answer|correct|why|mcq|question|chapter|topic|axilla|heart|epithelium)/.test(q)) {
+            qmAddMessage("Exam Mode is on, so I will not reveal answers during the quiz. Finish the quiz, then ask me to explain it.", "bot");
+            return;
+          }
+          if (/(past paper|paper|batch|send up|sendup|proff)/.test(q)) {
+            qmAddMessage("Past papers are grouped by batch on the home page. Open Browse every Paper / Year, choose Batch 30, 29, 28, 27, or Other Papers, then tap a paper to start it.", "bot", [{ label: "Open papers", run: qmOpenPapers }]);
+            return;
+          }
+          if (/(report|review|error in|wrong question|mistake in question|correction)/.test(q)) {
+            qmAddMessage("Use Send a Review to report a wrong question, wrong answer, or correction. Write the question and the correct source if you know it.", "bot", [{ label: "Send a Review", run: function () { show("viewSend"); } }]);
+            return;
+          }
+          if (/(mistake|download)/.test(q)) {
+            qmAddMessage("My Mistakes collects questions you answered wrong or timed out on. You can retry them as a quiz or download them for revision. Saved mistakes now: " + mistakeKeys.length + ".", "bot", [{ label: "Open My Mistakes", run: function () { renderMistakes(); show("viewMistakes"); } }]);
+            return;
+          }
+          if (/(weak|stats|accuracy|score|progress)/.test(q)) {
+            qmAddMessage(qmWeakTopicsText(), "bot", [
+              { label: "Open My Stats", run: function () { renderStats(); show("viewStats"); } },
+              { label: "Revise mistakes", run: function () { renderMistakes(); show("viewMistakes"); } }
+            ]);
+            return;
+          }
+          if (/bookmark/.test(q)) {
+            var bookmarkRefs = Object.keys(bookmarkSet).map(function (key) { var p = key.split(":"); return { b: p[0], i: Number(p[1]) }; });
+            qmAddMessage(bookmarkRefs.length ? "You have " + bookmarkRefs.length + " bookmarked question(s). You can revise them as a quiz." : "No bookmarks yet. During a quiz, tap Bookmark on any question to save it for revision.", "bot", bookmarkRefs.length ? [{ label: "Revise bookmarks", run: function () { startQuiz("Bookmarks · Revise", bookmarkRefs); } }] : [{ label: "Go home", run: qmGoHome }]);
+            return;
+          }
+          if (/(learning mode|exam mode|mode)/.test(q)) {
+            qmAddMessage("Learning Mode shows the correct answer and explanation after each question. Exam Mode hides answers during the quiz and shows the review at the end.", "bot");
+            return;
+          }
+          if (/(timer|time out|timeout|seconds)/.test(q)) {
+            qmAddMessage("You can choose the time per question before starting. If time runs out in Learning Mode, that question is counted wrong and the explanation is shown.", "bot", [{ label: "Go home", run: qmGoHome }]);
+            return;
+          }
+          if (/(chapter not confirmed|not confirmed|unverified)/.test(q)) {
+            qmAddMessage("Chapter not confirmed yet means the question could not be matched to a book chapter with confidence, so it is kept separate instead of being guessed into a chapter.", "bot", [{ label: "Browse chapters", run: qmGoHome }]);
+            return;
+          }
+          if (/(start|how to|begin|use)/.test(q) && q.length < 45) {
+            qmAddMessage("Choose a paper and subject, set the timer, tap Start, then choose Learning Mode or Exam Mode.", "bot", [{ label: "Go home", run: qmGoHome }]);
+            return;
+          }
+          if (/(explain|why|correct answer|this mcq|this question)/.test(q) && current) {
+            if (quiz.feedbackMode !== "end" && current.chosen === undefined) {
+              qmAddMessage("Answer this question first. In Learning Mode, I can explain it right after your attempt.", "bot");
+              return;
+            }
+            qmAddMessage(qmExplainItem(current.item), "bot", [{ label: "Open chapter", run: function () { var rows = qmTopChapters(chapterLabel(current.item)); if (rows.length) qmOpenChapter(rows[0].entry); else qmGoHome(); } }]);
+            return;
+          }
+          var chapters = qmTopChapters(query);
+          var best = qmBestMcq(query);
+          if (chapters.length) {
+            var top = chapters[0].entry;
+            var text = "Best match: " + top.subject + " · " + top.label + " (" + top.group.refs.length + " MCQs).";
+            if (chapters.length > 1) text += "\nAlso related: " + chapters.slice(1).map(function (row) { return row.entry.subject + " · " + row.entry.label; }).join("; ") + ".";
+            if (best) text += "\n\nClosest MCQ: " + best.item.q + "\n" + qmExplainItem(best.item);
+            qmAddMessage(text, "bot", [{ label: "Open chapter", run: function () { qmOpenChapter(top); } }]);
+            return;
+          }
+          if (best) {
+            qmAddMessage("Closest MCQ I found:\n" + best.item.q + "\n" + qmExplainItem(best.item), "bot");
+            return;
+          }
+          qmAddMessage("I could not find that in this quiz bank. Try a shorter topic, a chapter name, or words from the MCQ.", "bot");
+        }
+        if (els.quizMateLauncher) els.quizMateLauncher.addEventListener("click", qmOpen);
+        if (els.quizMateClose) els.quizMateClose.addEventListener("click", qmClose);
+        if (els.quizMateForm) els.quizMateForm.addEventListener("submit", function (event) {
+          event.preventDefault();
+          var value = els.quizMateInput.value;
+          els.quizMateInput.value = "";
+          qmAnswer(value);
+        });
+        Array.prototype.forEach.call(document.querySelectorAll("[data-qm-quick]"), function (btn) {
+          btn.addEventListener("click", function () { qmAnswer(btn.getAttribute("data-qm-quick")); });
         });
 
         /* ---------------- welcome, home, and graceful exit ---------------- */
