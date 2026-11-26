@@ -24,24 +24,34 @@
           "Reddy — Essentials of Forensic Medicine and Toxicology (35th ed.)": "Reddy",
           "Ananthanarayan & Paniker — Textbook of Microbiology (10th ed.)": "Ananthanarayan"
         };
-        /* Chapter label for one question. Anatomy shows BOTH books side by side
-           (KLM + BD Chaurasia); otherwise "Book Ch. N: Title". Items whose
-           chapter could not be confirmed are labelled, never guessed. */
+        /* Chapter label for one question. Anatomy is arranged by BD Chaurasia,
+           with the KLM reference kept after it; otherwise "Book Ch. N: Title".
+           Items whose chapter could not be confirmed are labelled, never guessed. */
         function chapterLabel(item) {
           if (item.chapter == null) return "Chapter not confirmed yet";
+          if (item.subject === "Anatomy" && item.chapter_bd) {
+            return item.chapter_bd + (item.chapter_klm ? " · " + item.chapter_klm : "");
+          }
           if (item.subject === "Anatomy" && item.chapter_klm) {
-            return item.chapter_klm + " · " + (item.chapter_bd || "");
+            return item.chapter_klm;
           }
           var book = BOOK_SHORT[item.chapter_book] || item.chapter_book || "";
           return (book ? book + " " : "") + "Ch. " + item.chapter + (item.chapter_title ? ": " + item.chapter_title : "");
+        }
+        function parseBdRef(bd) {
+          var m = String(bd || "").match(/^BD Chaurasia Vol\. (\d+), Ch\. (\d+):\s*(.*)$/);
+          if (!m) return null;
+          return { vol: Number(m[1]), chapter: Number(m[2]), title: m[3] };
         }
         /* "Past paper" for the per-chapter filter: a real paper label, not the
            "Send-up / Prof" original-bank label. Practice-bank items never count. */
         function isPastPaper(item, ref) {
           return ref.b === "m" && !!item.paper && item.paper !== "Send-up / Prof";
         }
-        /* Chapter groups for one subject, sorted by book then chapter number.
-           Each group: {book, chapter, title, refs, paperRefs, unverified}. */
+        /* Chapter groups for one subject. Anatomy is grouped by its existing
+           BD Chaurasia reference only; every other subject keeps the previous
+           book/chapter grouping. Each group: {book, chapter, title, refs,
+           paperRefs, unverified}. */
         function chapterGroups(subject) {
           var groups = {};
           var order = [];
@@ -49,10 +59,24 @@
             pair[1].forEach(function (item, i) {
               if (item.subject !== subject) return;
               var ref = { b: pair[0], i: i };
-              var key = item.chapter == null ? "unverified" : (item.chapter_book || "") + "|" + item.chapter;
+              var bd = subject === "Anatomy" && item.chapter != null ? parseBdRef(item.chapter_bd) : null;
+              var key = item.chapter == null ? "unverified" : bd ? "BD|" + bd.vol + "|" + bd.chapter + "|" + bd.title : (item.chapter_book || "") + "|" + item.chapter;
               var g = groups[key];
               if (!g) {
-                g = { key: key, book: item.chapter_book, chapter: item.chapter, title: item.chapter_title, refs: [], paperRefs: [], unverified: item.chapter == null };
+                g = {
+                  key: key,
+                  book: bd ? "BD Chaurasia" : item.chapter_book,
+                  chapter: bd ? bd.chapter : item.chapter,
+                  title: bd ? bd.title : item.chapter_title,
+                  anatomyBd: !!bd,
+                  bdVol: bd ? bd.vol : null,
+                  bdChapter: bd ? bd.chapter : null,
+                  bdTitle: bd ? bd.title : null,
+                  bdLabel: bd ? item.chapter_bd : null,
+                  refs: [],
+                  paperRefs: [],
+                  unverified: item.chapter == null
+                };
                 groups[key] = g;
                 order.push(g);
               }
@@ -62,6 +86,10 @@
           });
           order.sort(function (a, b) {
             if (a.unverified !== b.unverified) return a.unverified ? 1 : -1;
+            if (a.anatomyBd && b.anatomyBd) {
+              if (a.bdVol !== b.bdVol) return a.bdVol - b.bdVol;
+              return a.bdChapter - b.bdChapter;
+            }
             if (a.book !== b.book) return a.book < b.book ? -1 : 1;
             return a.chapter - b.chapter;
           });
@@ -94,6 +122,15 @@
           group.refs.forEach(function (ref) {
             var bd = itemOf(ref).chapter_bd;
             if (bd && !seen[bd]) { seen[bd] = true; out.push(bd); }
+          });
+          return out;
+        }
+        function distinctKlmRefs(group) {
+          var seen = {};
+          var out = [];
+          group.refs.forEach(function (ref) {
+            var klm = itemOf(ref).chapter_klm;
+            if (klm && !seen[klm]) { seen[klm] = true; out.push(klm); }
           });
           return out;
         }
@@ -512,17 +549,9 @@
         }
         function chapterCardLabel(group) {
           if (group.unverified) return "Chapter not confirmed yet";
-          if (group.book === "Moore — Clinically Oriented Anatomy (KLM)") {
-            var first = null;
-            group.refs.some(function (ref) {
-              var it = itemOf(ref);
-              if (it.chapter_klm) { first = it; return true; }
-              return false;
-            });
-            if (first) {
-              var summary = bdSummary(group);
-              return first.chapter_klm + (summary ? " · " + summary : "");
-            }
+          if (group.anatomyBd) {
+            var klmRefs = distinctKlmRefs(group);
+            return group.bdLabel + (klmRefs.length ? " · " + klmRefs.join("; ") : "");
           }
           var book = BOOK_SHORT[group.book] || group.book || "";
           return (book ? book + " " : "") + "Ch. " + group.chapter + (group.title ? ": " + group.title : "");
@@ -540,7 +569,7 @@
           var note = document.createElement("p");
           note.className = "section-note";
           note.textContent = subject === "Anatomy"
-            ? "Each chapter shows both books — KLM (Moore) and BD Chaurasia — side by side."
+            ? "Anatomy chapters are arranged by BD Chaurasia; the KLM reference is shown with each chapter."
             : "Chapters are from the book the questions are based on.";
           els.chapterPanel.appendChild(note);
           chapterGroups(subject).forEach(function (group) {
@@ -572,21 +601,9 @@
             unNote.className = "section-note";
             unNote.textContent = "These questions could not be matched to a book chapter with confidence, so they are listed here instead of being guessed into a chapter.";
             els.chapterPanel.appendChild(unNote);
-          } else if (group.book === "Moore — Clinically Oriented Anatomy (KLM)") {
+          } else if (group.anatomyBd) {
             var books = document.createElement("div");
             books.className = "chapter-books";
-            var klmLine = document.createElement("div");
-            var klmStrong = document.createElement("strong");
-            klmStrong.textContent = "KLM: ";
-            klmLine.appendChild(klmStrong);
-            var first = null;
-            group.refs.some(function (ref) {
-              var it = itemOf(ref);
-              if (it.chapter_klm) { first = it; return true; }
-              return false;
-            });
-            klmLine.appendChild(document.createTextNode(first ? first.chapter_klm : ""));
-            books.appendChild(klmLine);
             distinctBdRefs(group).forEach(function (bd) {
               var line = document.createElement("div");
               var bStrong = document.createElement("strong");
@@ -594,6 +611,14 @@
               line.appendChild(bStrong);
               line.appendChild(document.createTextNode(bd.replace(/^BD Chaurasia /, "")));
               books.appendChild(line);
+            });
+            distinctKlmRefs(group).forEach(function (klm) {
+              var klmLine = document.createElement("div");
+              var klmStrong = document.createElement("strong");
+              klmStrong.textContent = "KLM: ";
+              klmLine.appendChild(klmStrong);
+              klmLine.appendChild(document.createTextNode(klm));
+              books.appendChild(klmLine);
             });
             els.chapterPanel.appendChild(books);
           } else {
